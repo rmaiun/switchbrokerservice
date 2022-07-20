@@ -45,7 +45,7 @@ object Learnhttp4sServer:
           .build >>
         Resource.eval(Async[F].never)
       ).concurrently(Fs2Stream.eval(Sync[F].delay(println("starting..."))))
-        .concurrently(Fs2Stream.awakeDelay(1 seconds).evalTap(_ => SomeService.doSomeRepeatableAction()).interruptWhen(switch))
+        .concurrently(Fs2Stream.awakeDelay(1 seconds).evalTap(_ => SomeService.doSomeRepeatableAction("1")).interruptWhen(switch))
     } yield exitCode
   }.drain
 
