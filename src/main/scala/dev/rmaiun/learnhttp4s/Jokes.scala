@@ -1,14 +1,16 @@
 package dev.rmaiun.learnhttp4s
 
+import cats.Monad
 import cats.effect.Concurrent
-import cats.implicits._
-import io.circe.{Encoder, Decoder}
-import org.http4s._
-import org.http4s.implicits._
+import cats.implicits.*
+import fs2.concurrent.SignallingRef
+import io.circe.{Decoder, Encoder}
+import org.http4s.*
+import org.http4s.implicits.*
 import org.http4s.client.Client
 import org.http4s.client.dsl.Http4sClientDsl
-import org.http4s.circe._
-import org.http4s.Method._
+import org.http4s.circe.*
+import org.http4s.Method.*
 
 trait Jokes[F[_]]:
   def get: F[Jokes.Joke]
@@ -25,9 +27,13 @@ object Jokes:
 
   final case class JokeError(e: Throwable) extends RuntimeException
 
-  def impl[F[_]: Concurrent](C: Client[F]): Jokes[F] = new Jokes[F]:
-    val dsl = new Http4sClientDsl[F]{}
+  def impl[F[_]: Concurrent:Monad](C: Client[F], switch: SignallingRef[F, Boolean]): Jokes[F] = new Jokes[F]:
+    val dsl: Http4sClientDsl[F] = new Http4sClientDsl[F]{}
     import dsl._
-    def get: F[Jokes.Joke] = 
-      C.expect[Joke](GET(uri"https://icanhazdadjoke.com/"))
+    def get: F[Jokes.Joke] = {
+
+      val response = C.expect[Joke](GET(uri"https://icanhazdadjoke.com/"))
         .adaptError{ case t => JokeError(t)} // Prevent Client Json Decoding Failure Leaking
+
+      switch.getAndUpdate(x => !x) *> response
+    }
