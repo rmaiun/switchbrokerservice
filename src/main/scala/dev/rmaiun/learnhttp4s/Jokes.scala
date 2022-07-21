@@ -1,8 +1,9 @@
 package dev.rmaiun.learnhttp4s
 
 import cats.Monad
-import cats.effect.{Async, Concurrent}
+import cats.effect.{Async, Concurrent, Fiber}
 import cats.implicits.*
+import fs2.Stream as Fs2Stream
 import fs2.concurrent.SignallingRef
 import io.circe.{Decoder, Encoder}
 import org.http4s.*
@@ -42,8 +43,10 @@ object Jokes:
       val id = Random.nextInt(1000).toString
       switch.getAndUpdate(x => !x) *>
         switch.getAndUpdate(x => !x) *>
-        fs2.Stream.empty.concurrently(
-          fs2.Stream.awakeDelay(1 second).evalTap(_ => SomeService.doSomeRepeatableAction(id)).interruptWhen(switch)
-        ).compile.drain *>
+        Concurrent[F].start(Fs2Stream.awakeDelay(1 second)
+          .evalTap(_ => SomeService.doSomeRepeatableAction(id))
+          .interruptWhen(switch)
+          .compile
+          .drain) *>
         response
     }
