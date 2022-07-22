@@ -20,3 +20,10 @@ lazy val root = (project in file("."))
     ),
     testFrameworks += new TestFramework("munit.Framework")
   )
+
+lazy val formatAll = taskKey[Unit]("Run scala formatter for all projects")
+
+formatAll := {
+  (root / Compile / scalafmt).value
+  (root / Test / scalafmt).value
+}

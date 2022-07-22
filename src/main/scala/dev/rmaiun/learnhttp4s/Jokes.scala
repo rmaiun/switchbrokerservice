@@ -1,11 +1,11 @@
 package dev.rmaiun.learnhttp4s
 
 import cats.Monad
-import cats.effect.{Async, Concurrent, Fiber}
+import cats.effect.{ Async, Concurrent, Fiber }
 import cats.implicits.*
 import fs2.Stream as Fs2Stream
 import fs2.concurrent.SignallingRef
-import io.circe.{Decoder, Encoder}
+import io.circe.{ Decoder, Encoder }
 import org.http4s.*
 import org.http4s.Method.*
 import org.http4s.circe.*
@@ -26,27 +26,31 @@ object Jokes:
 
   final case class Joke(joke: String)
   object Joke:
-    given Decoder[Joke] = Decoder.derived[Joke]
+    given Decoder[Joke]                              = Decoder.derived[Joke]
     given [F[_]: Concurrent]: EntityDecoder[F, Joke] = jsonOf
-    given Encoder[Joke] = Encoder.AsObject.derived[Joke]
-    given [F[_]]: EntityEncoder[F, Joke] = jsonEncoderOf
+    given Encoder[Joke]                              = Encoder.AsObject.derived[Joke]
+    given [F[_]]: EntityEncoder[F, Joke]             = jsonEncoderOf
 
   final case class JokeError(e: Throwable) extends RuntimeException
 
-  def impl[F[_]: Concurrent:Monad: Async:Logger](C: Client[F], switch: SignallingRef[F, Boolean]): Jokes[F] = new Jokes[F]:
-    val dsl: Http4sClientDsl[F] = new Http4sClientDsl[F]{}
-    import dsl.*
-    def get: F[Jokes.Joke] = {
+  def impl[F[_]: Concurrent: Monad: Async: Logger](C: Client[F], switch: SignallingRef[F, Boolean]): Jokes[F] =
+    new Jokes[F]:
+      val dsl: Http4sClientDsl[F] = new Http4sClientDsl[F] {}
+      import dsl.*
+      def get: F[Jokes.Joke] =
 
-      val response = C.expect[Joke](GET(uri"https://icanhazdadjoke.com/"))
-        .adaptError{ case t => JokeError(t)} // Prevent Client Json Decoding Failure Leaking
-      val id = Random.nextInt(1000).toString
-      switch.getAndUpdate(x => !x) *>
+        val response = C.expect[Joke](GET(uri"https://icanhazdadjoke.com/")).adaptError { case t =>
+          JokeError(t)
+        } // Prevent Client Json Decoding Failure Leaking
+        val id = Random.nextInt(1000).toString
         switch.getAndUpdate(x => !x) *>
-        Concurrent[F].start(Fs2Stream.awakeDelay(1 second)
-          .evalTap(_ => SomeService.doSomeRepeatableAction(id))
-          .interruptWhen(switch)
-          .compile
-          .drain) *>
-        response
-    }
+          switch.getAndUpdate(x => !x) *>
+          Concurrent[F].start(
+            Fs2Stream
+              .awakeDelay(1 second)
+              .evalTap(_ => SomeService.doSomeRepeatableAction(id))
+              .interruptWhen(switch)
+              .compile
+              .drain
+          ) *>
+          response
