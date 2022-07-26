@@ -2,17 +2,18 @@ package dev.rmaiun.learnhttp4s.helper
 
 import cats.Monad
 import cats.data.Kleisli
-import cats.effect.MonadCancel
+import cats.effect.{Async, MonadCancel}
+import cats.effect.std.Dispatcher
 import dev.profunktor.fs2rabbit.config.Fs2RabbitConfig
 import dev.profunktor.fs2rabbit.config.declaration.*
 import dev.profunktor.fs2rabbit.effects.MessageEncoder
 import dev.profunktor.fs2rabbit.interpreter.RabbitClient
-import dev.profunktor.fs2rabbit.model.ExchangeType.Direct
 import dev.profunktor.fs2rabbit.model.*
+import dev.profunktor.fs2rabbit.model.ExchangeType.Direct
 import fs2.Stream as Fs2Stream
-import scala.concurrent.duration.*
 
 import java.nio.charset.Charset
+import scala.concurrent.duration.*
 
 object RabbitHelper:
   type AmqpPublisher[F[_]]  = AmqpMessage[String] => F[Unit]
@@ -37,6 +38,28 @@ object RabbitHelper:
     internalQueueSize = Some(500),
     automaticRecovery = true
   )
+
+  def config2: Fs2RabbitConfig = Fs2RabbitConfig(
+    virtualHost = "dev2",
+    host = "localhost",
+    port = 5682,
+    connectionTimeout = 5000.seconds,
+    username = Some("guest"),
+    password = Some("guest"),
+    ssl = false,
+    requeueOnNack = false,
+    requeueOnReject = false,
+    internalQueueSize = Some(500),
+    automaticRecovery = true
+  )
+
+  def initConnection[F[_]:Async](cfg:Fs2RabbitConfig): Fs2Stream[F, AmqpStructures[F]] =
+    for
+      dispatcher <- Fs2Stream.resource(Dispatcher[F])
+      rc         <- Fs2Stream.eval(RabbitClient[F](cfg, dispatcher))
+      _          <- Fs2Stream.eval(RabbitHelper.initRabbitRoutes(rc))
+      structs    <- RabbitHelper.createRabbitConnection(rc)
+    yield structs
 
   private val inputQ      = QueueName("input_q")
   private val inRK        = RoutingKey("bot_in_rk")

@@ -2,9 +2,9 @@ package dev.rmaiun.learnhttp4s
 
 import cats.data.Kleisli
 import cats.effect.std.Dispatcher
-import cats.effect.{ Async, MonadCancel, Resource, Sync }
+import cats.effect.*
 import cats.syntax.all.*
-import cats.{ Monad, MonadError }
+import cats.{Monad, MonadError}
 import com.comcast.ip4s.*
 import dev.profunktor.fs2rabbit.config.Fs2RabbitConfig
 import dev.profunktor.fs2rabbit.config.declaration.*
@@ -13,6 +13,7 @@ import dev.profunktor.fs2rabbit.interpreter.RabbitClient
 import dev.profunktor.fs2rabbit.model.*
 import dev.profunktor.fs2rabbit.model.ExchangeType.Direct
 import dev.rmaiun.learnhttp4s.helper.RabbitHelper
+import dev.rmaiun.learnhttp4s.helper.RabbitHelper.AmqpPublisher
 import fs2.Stream as Fs2Stream
 import fs2.concurrent.SignallingRef
 import org.http4s.ember.client.EmberClientBuilder
@@ -31,14 +32,18 @@ object Learnhttp4sServer:
   def stream[F[_]: Async](switch: SignallingRef[F, Boolean]): Fs2Stream[F, Nothing] = {
     given logger[F[_]: Sync]: Logger[F] = Slf4jLogger.getLogger[F]
     for
-      client       <- Fs2Stream.resource(EmberClientBuilder.default[F].build)
-      helloWorldAlg = HelloWorld.impl[F]
-      jokeAlg       = Jokes.impl[F](client, switch)
-
+      client <- Fs2Stream.resource(EmberClientBuilder.default[F].build)
       // Combine Service Routes into an HttpApp.
       // Can also be done via a Router if you
       // want to extract a segments not checked
       // in the underlying routes.
+      structs <- RabbitHelper.initConnection(RabbitHelper.config)
+
+      helloWorldAlg = HelloWorld.impl[F]
+      publisher    <- Fs2Stream.eval(Ref[F].of(structs.botInPublisher))
+      p <- Fs2Stream.eval(publisher.get)
+      _ <- Fs2Stream.eval(p(AmqpMessage("hello there", AmqpProperties())))
+      jokeAlg = Jokes.impl[F](client, switch, publisher)
       httpApp = (
                   Learnhttp4sRoutes.helloWorldRoutes[F](helloWorldAlg) <+>
                     Learnhttp4sRoutes.jokeRoutes[F](jokeAlg)
@@ -46,10 +51,6 @@ object Learnhttp4sServer:
 
       // With Middlewares in place
       finalHttpApp = MiddlewareLogger.httpApp(true, true)(httpApp)
-      dispatcher  <- Fs2Stream.resource(Dispatcher[F])
-      rc          <- Fs2Stream.eval(RabbitClient[F](RabbitHelper.config, dispatcher))
-      _           <- Fs2Stream.eval(RabbitHelper.initRabbitRoutes(rc))
-      structs     <- RabbitHelper.createRabbitConnection(rc)
       exitCode <-
         Fs2Stream
           .resource(
@@ -66,7 +67,7 @@ object Learnhttp4sServer:
 //            Fs2Stream.awakeDelay(1 seconds).evalTap(_ => SomeService.doSomeRepeatableAction("1")).interruptWhen(switch)
 //          )
           .concurrently(
-            structs.botInConsumer.evalTap(x => SomeService.doSomeRepeatableAction(x.payload)).interruptWhen(switch)
+            structs.botInConsumer.evalTap(x => SomeService.doSomeRepeatableAction("1", x.payload)).interruptWhen(switch)
           )
     yield exitCode
   }.drain

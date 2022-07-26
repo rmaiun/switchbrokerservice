@@ -1,11 +1,14 @@
 package dev.rmaiun.learnhttp4s
 
 import cats.Monad
-import cats.effect.{ Async, Concurrent, Fiber }
+import cats.effect.*
 import cats.implicits.*
+import dev.profunktor.fs2rabbit.model.*
+import dev.rmaiun.learnhttp4s.helper.RabbitHelper
+import dev.rmaiun.learnhttp4s.helper.RabbitHelper.{AmqpPublisher, AmqpStructures}
 import fs2.Stream as Fs2Stream
 import fs2.concurrent.SignallingRef
-import io.circe.{ Decoder, Encoder }
+import io.circe.{Decoder, Encoder}
 import org.http4s.*
 import org.http4s.Method.*
 import org.http4s.circe.*
@@ -20,6 +23,7 @@ import scala.util.Random
 
 trait Jokes[F[_]]:
   def get: F[Jokes.Joke]
+  def get2: F[Jokes.Joke]
 
 object Jokes:
   def apply[F[_]](using ev: Jokes[F]): Jokes[F] = ev
@@ -33,24 +37,47 @@ object Jokes:
 
   final case class JokeError(e: Throwable) extends RuntimeException
 
-  def impl[F[_]: Concurrent: Monad: Async: Logger](C: Client[F], switch: SignallingRef[F, Boolean]): Jokes[F] =
+  def impl[F[_]: Concurrent: Monad: Async: Logger](
+    C: Client[F],
+    switch: SignallingRef[F, Boolean],
+    pub: Ref[F, AmqpPublisher[F]]
+  ): Jokes[F] =
     new Jokes[F]:
       val dsl: Http4sClientDsl[F] = new Http4sClientDsl[F] {}
       import dsl.*
       def get: F[Jokes.Joke] =
-
-        val response = C.expect[Joke](GET(uri"https://icanhazdadjoke.com/")).adaptError { case t =>
+        val response: F[Jokes.Joke] = C.expect[Joke](GET(uri"https://icanhazdadjoke.com/")).adaptError { case t =>
           JokeError(t)
-        } // Prevent Client Json Decoding Failure Leaking
-        val id = Random.nextInt(1000).toString
-        switch.getAndUpdate(x => !x) *>
-          switch.getAndUpdate(x => !x) *>
-          Concurrent[F].start(
-            Fs2Stream
-              .awakeDelay(1 second)
-              .evalTap(_ => SomeService.doSomeRepeatableAction(id))
-              .interruptWhen(switch)
-              .compile
-              .drain
-          ) *>
-          response
+        }
+        for
+          r       <- response
+          _       <- refreshSwitch(switch)
+          _       <- Concurrent[F].start(processReconnectionToBroker(switch, pub))
+          sender <- pub.get
+          _ <- sender(AmqpMessage(r.joke, AmqpProperties()))
+        yield r
+
+      def processReconnectionToBroker(switch: SignallingRef[F, Boolean], pub: Ref[F, AmqpPublisher[F]]): F[Unit] ={
+        val consumerStream = for{
+          structs <- RabbitHelper.initConnection(RabbitHelper.config2)
+          _ <- Fs2Stream.eval(pub.update(_ => structs.botInPublisher))
+          consumer <- structs.botInConsumer
+            .evalTap(msg => SomeService.doSomeRepeatableAction(2.toString, msg.payload))
+            .interruptWhen(switch)
+        }yield consumer
+        consumerStream.compile.drain
+      }
+
+      def get2: F[Jokes.Joke] =
+        val response: F[Jokes.Joke] = C.expect[Joke](GET(uri"https://icanhazdadjoke.com/")).adaptError { case t =>
+          JokeError(t)
+        }
+        for
+          r       <- response
+//          _       <- refreshSwitch(switch)
+          sender <- pub.get
+          _ <- sender(AmqpMessage(r.joke, AmqpProperties()))
+        yield r
+
+      def refreshSwitch[F[_]: Sync](switch: SignallingRef[F, Boolean]): F[Unit] =
+        switch.update(x => !x) *> switch.update(x => !x)
