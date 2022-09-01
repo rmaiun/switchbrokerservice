@@ -39,10 +39,10 @@ object RabbitHelper:
     automaticRecovery = true
   )
 
-  def config2: Fs2RabbitConfig = Fs2RabbitConfig(
-    virtualHost = "dev2",
+  def reconfig(port:Int, virtualHost:String): Fs2RabbitConfig = Fs2RabbitConfig(
+    virtualHost = virtualHost,
     host = "localhost",
-    port = 5682,
+    port = port,
     connectionTimeout = 5000.seconds,
     username = Some("guest"),
     password = Some("guest"),

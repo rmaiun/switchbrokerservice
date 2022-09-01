@@ -59,7 +59,7 @@ object Jokes:
 
       def processReconnectionToBroker(switch: SignallingRef[F, Boolean], pub: Ref[F, AmqpPublisher[F]]): F[Unit] ={
         val consumerStream = for{
-          structs <- RabbitHelper.initConnection(RabbitHelper.config2)
+          structs <- RabbitHelper.initConnection(RabbitHelper.reconfig(5672,"dev"))
           _ <- Fs2Stream.eval(pub.update(_ => structs.botInPublisher))
           consumer <- structs.botInConsumer
             .evalTap(msg => SomeService.doSomeRepeatableAction(2.toString, msg.payload))

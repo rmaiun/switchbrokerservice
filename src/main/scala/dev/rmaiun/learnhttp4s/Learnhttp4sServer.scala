@@ -1,8 +1,8 @@
 package dev.rmaiun.learnhttp4s
 
 import cats.data.Kleisli
-import cats.effect.std.Dispatcher
 import cats.effect.*
+import cats.effect.std.Dispatcher
 import cats.syntax.all.*
 import cats.{Monad, MonadError}
 import com.comcast.ip4s.*
@@ -41,12 +41,14 @@ object Learnhttp4sServer:
 
       helloWorldAlg = HelloWorld.impl[F]
       publisher    <- Fs2Stream.eval(Ref[F].of(structs.botInPublisher))
-      p <- Fs2Stream.eval(publisher.get)
-      _ <- Fs2Stream.eval(p(AmqpMessage("hello there", AmqpProperties())))
-      jokeAlg = Jokes.impl[F](client, switch, publisher)
+      p            <- Fs2Stream.eval(publisher.get)
+      _            <- Fs2Stream.eval(p(AmqpMessage("hello there", AmqpProperties())))
+      jokeAlg       = Jokes.impl[F](client, switch, publisher)
+      swapSlotAlg   = SwapSlotService.impl(switch, publisher)
       httpApp = (
                   Learnhttp4sRoutes.helloWorldRoutes[F](helloWorldAlg) <+>
-                    Learnhttp4sRoutes.jokeRoutes[F](jokeAlg)
+                    Learnhttp4sRoutes.jokeRoutes[F](jokeAlg) <+>
+                    Learnhttp4sRoutes.swapSlotRoutes[F](swapSlotAlg)
                 ).orNotFound
 
       // With Middlewares in place
@@ -63,9 +65,16 @@ object Learnhttp4sServer:
               Resource.eval(Async[F].never)
           )
           .concurrently(Fs2Stream.eval(Sync[F].delay(println("starting..."))))
-//          .concurrently(
-//            Fs2Stream.awakeDelay(1 seconds).evalTap(_ => SomeService.doSomeRepeatableAction("1")).interruptWhen(switch)
-//          )
+          .concurrently(
+            Fs2Stream
+              .awakeDelay(2 seconds)
+              .evalTap(_ =>
+                for
+                  pb <- publisher.get
+                  _  <- pb(AmqpMessage("ping", new AmqpProperties()))
+                yield ()
+              )
+          )
           .concurrently(
             structs.botInConsumer.evalTap(x => SomeService.doSomeRepeatableAction("1", x.payload)).interruptWhen(switch)
           )
