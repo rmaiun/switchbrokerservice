@@ -4,7 +4,7 @@ import cats.data.Kleisli
 import cats.effect.*
 import cats.effect.std.Dispatcher
 import cats.syntax.all.*
-import cats.{Monad, MonadError}
+import cats.{ Monad, MonadError }
 import com.comcast.ip4s.*
 import dev.profunktor.fs2rabbit.config.Fs2RabbitConfig
 import dev.profunktor.fs2rabbit.config.declaration.*
@@ -16,6 +16,7 @@ import dev.rmaiun.learnhttp4s.helper.RabbitHelper
 import dev.rmaiun.learnhttp4s.helper.RabbitHelper.AmqpPublisher
 import fs2.Stream as Fs2Stream
 import fs2.concurrent.SignallingRef
+import org.http4s.HttpApp
 import org.http4s.ember.client.EmberClientBuilder
 import org.http4s.ember.server.EmberServerBuilder
 import org.http4s.implicits.*
@@ -32,51 +33,39 @@ object Learnhttp4sServer:
   def stream[F[_]: Async](switch: SignallingRef[F, Boolean]): Fs2Stream[F, Nothing] = {
     given logger[F[_]: Sync]: Logger[F] = Slf4jLogger.getLogger[F]
     for
-      client <- Fs2Stream.resource(EmberClientBuilder.default[F].build)
-      // Combine Service Routes into an HttpApp.
-      // Can also be done via a Router if you
-      // want to extract a segments not checked
-      // in the underlying routes.
-      structs <- RabbitHelper.initConnection(RabbitHelper.config)
-
-      helloWorldAlg = HelloWorld.impl[F]
-      publisher    <- Fs2Stream.eval(Ref[F].of(structs.botInPublisher))
-      p            <- Fs2Stream.eval(publisher.get)
-      _            <- Fs2Stream.eval(p(AmqpMessage("hello there", AmqpProperties())))
-      jokeAlg       = Jokes.impl[F](client, switch, publisher)
-      swapSlotAlg   = SwapSlotService.impl(switch, publisher)
-      httpApp = (
-                  Learnhttp4sRoutes.helloWorldRoutes[F](helloWorldAlg) <+>
-                    Learnhttp4sRoutes.jokeRoutes[F](jokeAlg) <+>
-                    Learnhttp4sRoutes.swapSlotRoutes[F](swapSlotAlg)
-                ).orNotFound
-
-      // With Middlewares in place
+      structs     <- RabbitHelper.initConnection(RabbitHelper.config)
+      publisher   <- Fs2Stream.eval(Ref[F].of(structs.botInPublisher))
+      p           <- Fs2Stream.eval(publisher.get)
+      _           <- Fs2Stream.eval(p(AmqpMessage("Initial message", AmqpProperties())))
+      swapSlotAlg  = SwapSlotService.impl(switch, publisher)
+      httpApp      = (Learnhttp4sRoutes.swapSlotRoutes[F](swapSlotAlg)).orNotFound
       finalHttpApp = MiddlewareLogger.httpApp(true, true)(httpApp)
       exitCode <-
-        Fs2Stream
-          .resource(
-            EmberServerBuilder
-              .default[F]
-              .withHost(ipv4"0.0.0.0")
-              .withPort(port"8080")
-              .withHttpApp(finalHttpApp)
-              .build >>
-              Resource.eval(Async[F].never)
-          )
-          .concurrently(Fs2Stream.eval(Sync[F].delay(println("starting..."))))
-          .concurrently(
-            Fs2Stream
-              .awakeDelay(2 seconds)
-              .evalTap(_ =>
-                for
-                  pb <- publisher.get
-                  _  <- pb(AmqpMessage("ping", new AmqpProperties()))
-                yield ()
-              )
-          )
+        runServer(finalHttpApp)
+          .concurrently(Fs2Stream.eval(Sync[F].delay(println("Starting..."))))
+          .concurrently(runPingSignals(publisher))
           .concurrently(
             structs.botInConsumer.evalTap(x => SomeService.doSomeRepeatableAction("1", x.payload)).interruptWhen(switch)
           )
     yield exitCode
   }.drain
+
+  def runServer[F[_]: Async](httpApp: HttpApp[F]): Fs2Stream[F, Nothing] = Fs2Stream.resource(
+    EmberServerBuilder
+      .default[F]
+      .withHost(ipv4"0.0.0.0")
+      .withPort(port"8080")
+      .withHttpApp(httpApp)
+      .build >>
+      Resource.eval(Async[F].never)
+  )
+
+  def runPingSignals[F[_]: Async](publisher: Ref[F, AmqpPublisher[F]]): Fs2Stream[F, FiniteDuration] =
+    val pingFunc: FiniteDuration => F[Unit] = _ =>
+      for
+        pb <- publisher.get
+        _  <- pb(AmqpMessage("ping", new AmqpProperties()))
+      yield ()
+    Fs2Stream
+      .awakeDelay(2 seconds)
+      .evalTap(pingFunc)

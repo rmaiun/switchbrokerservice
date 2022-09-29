@@ -2,8 +2,8 @@ package dev.rmaiun.learnhttp4s.helper
 
 import cats.Monad
 import cats.data.Kleisli
-import cats.effect.{Async, MonadCancel}
 import cats.effect.std.Dispatcher
+import cats.effect.{ Async, MonadCancel }
 import dev.profunktor.fs2rabbit.config.Fs2RabbitConfig
 import dev.profunktor.fs2rabbit.config.declaration.*
 import dev.profunktor.fs2rabbit.effects.MessageEncoder
@@ -39,7 +39,7 @@ object RabbitHelper:
     automaticRecovery = true
   )
 
-  def reconfig(port:Int, virtualHost:String): Fs2RabbitConfig = Fs2RabbitConfig(
+  def reconfig(port: Int, virtualHost: String): Fs2RabbitConfig = Fs2RabbitConfig(
     virtualHost = virtualHost,
     host = "localhost",
     port = port,
@@ -53,7 +53,7 @@ object RabbitHelper:
     automaticRecovery = true
   )
 
-  def initConnection[F[_]:Async](cfg:Fs2RabbitConfig): Fs2Stream[F, AmqpStructures[F]] =
+  def initConnection[F[_]: Async](cfg: Fs2RabbitConfig): Fs2Stream[F, AmqpStructures[F]] =
     for
       dispatcher <- Fs2Stream.resource(Dispatcher[F])
       rc         <- Fs2Stream.eval(RabbitClient[F](cfg, dispatcher))
@@ -97,11 +97,12 @@ object RabbitHelper:
   ): Fs2Stream[F, Fs2Stream[F, AmqpEnvelope[String]]] =
     Fs2Stream
       .resource(rc.createConnectionChannel)
-      .flatMap(implicit ch => Fs2Stream.eval(rc.createAutoAckConsumer(q)))
+      .flatMap(ch => Fs2Stream.eval(rc.createAutoAckConsumer(q)(ch, summon)))
 
   def publisher[F[_]: MonadThrowable](rk: RoutingKey, rc: RabbitClient[F])(using
     me: MessageEncoder[F, AmqpMessage[String]]
   ): Fs2Stream[F, AmqpMessage[String] => F[Unit]] =
-    Fs2Stream
-      .resource(rc.createConnectionChannel)
-      .flatMap(implicit ch => Fs2Stream.eval(rc.createPublisher[AmqpMessage[String]](botExchange, rk)))
+    for
+      ch <- Fs2Stream.resource(rc.createConnectionChannel)
+      x  <- Fs2Stream.eval(rc.createPublisher[AmqpMessage[String]](botExchange, rk)(ch, summon))
+    yield x
