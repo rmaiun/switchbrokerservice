@@ -10,6 +10,7 @@ import dev.profunktor.fs2rabbit.effects.MessageEncoder
 import dev.profunktor.fs2rabbit.interpreter.RabbitClient
 import dev.profunktor.fs2rabbit.model.*
 import dev.profunktor.fs2rabbit.model.ExchangeType.Direct
+import dev.rmaiun.learnhttp4s.Learnhttp4sRoutes.SwapSlotCommand
 import fs2.Stream as Fs2Stream
 
 import java.nio.charset.Charset
@@ -25,27 +26,13 @@ object RabbitHelper:
     botInConsumer: AmqpConsumer[F]
   )(using MC: MonadCancel[F, Throwable])
 
-  def config: Fs2RabbitConfig = Fs2RabbitConfig(
-    virtualHost = "dev",
-    host = "localhost",
-    port = 5672,
+  def reconfig(dto: SwapSlotCommand): Fs2RabbitConfig = Fs2RabbitConfig(
+    virtualHost = dto.virtualHost,
+    host = dto.host,
+    port = dto.port,
     connectionTimeout = 5000.seconds,
-    username = Some("guest"),
-    password = Some("guest"),
-    ssl = false,
-    requeueOnNack = false,
-    requeueOnReject = false,
-    internalQueueSize = Some(500),
-    automaticRecovery = true
-  )
-
-  def reconfig(port: Int, virtualHost: String): Fs2RabbitConfig = Fs2RabbitConfig(
-    virtualHost = virtualHost,
-    host = "localhost",
-    port = port,
-    connectionTimeout = 5000.seconds,
-    username = Some("guest"),
-    password = Some("guest"),
+    username = Some(dto.user),
+    password = Some(dto.password),
     ssl = false,
     requeueOnNack = false,
     requeueOnReject = false,
@@ -54,18 +41,18 @@ object RabbitHelper:
   )
 
   def initConnection[F[_]: Async](cfg: Fs2RabbitConfig): Fs2Stream[F, AmqpStructures[F]] =
-    for
+    for {
       dispatcher <- Fs2Stream.resource(Dispatcher[F])
       rc         <- Fs2Stream.eval(RabbitClient[F](cfg, dispatcher))
       _          <- Fs2Stream.eval(RabbitHelper.initRabbitRoutes(rc))
       structs    <- RabbitHelper.createRabbitConnection(rc)
-    yield structs
+    } yield structs
 
   private val inputQ      = QueueName("input_q")
   private val inRK        = RoutingKey("bot_in_rk")
   private val botExchange = ExchangeName("bot_exchange")
 
-  def initRabbitRoutes[F[_]](rc: RabbitClient[F])(using MC: MonadCancel[F, Throwable]): F[Unit] =
+  def initRabbitRoutes[F[_]](rc: RabbitClient[F])(using MC: MonadCancel[F, Throwable]): F[Unit] = {
     import cats.implicits.*
     val channel = rc.createConnectionChannel
     channel.use { ch =>
@@ -78,18 +65,20 @@ object RabbitHelper:
         _ <- rc.bindQueue(inputQ, botExchange, inRK)(ch)
       yield ()
     }
+  }
 
   def createRabbitConnection[F[_]](rc: RabbitClient[F])(using
     MC: MonadCancel[F, Throwable]
-  ): Fs2Stream[F, AmqpStructures[F]] =
+  ): Fs2Stream[F, AmqpStructures[F]] = {
     given stringMessageCodec: Kleisli[F, AmqpMessage[String], AmqpMessage[Array[Byte]]] =
       Kleisli[F, AmqpMessage[String], AmqpMessage[Array[Byte]]](s =>
         Monad[F].pure(s.copy(payload = s.payload.getBytes(Charset.defaultCharset())))
       )
-    for
+    for {
       inPub      <- publisher(inRK, rc)
       inConsumer <- autoAckConsumer(inputQ, rc)
-    yield AmqpStructures(inPub, inConsumer)
+    } yield AmqpStructures(inPub, inConsumer)
+  }
 
   def autoAckConsumer[F[_]: MonadThrowable](
     q: QueueName,
@@ -102,7 +91,7 @@ object RabbitHelper:
   def publisher[F[_]: MonadThrowable](rk: RoutingKey, rc: RabbitClient[F])(using
     me: MessageEncoder[F, AmqpMessage[String]]
   ): Fs2Stream[F, AmqpMessage[String] => F[Unit]] =
-    for
+    for {
       ch <- Fs2Stream.resource(rc.createConnectionChannel)
       x  <- Fs2Stream.eval(rc.createPublisher[AmqpMessage[String]](botExchange, rk)(ch, summon))
-    yield x
+    } yield x

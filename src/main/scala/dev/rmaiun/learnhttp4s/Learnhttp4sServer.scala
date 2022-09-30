@@ -12,6 +12,7 @@ import dev.profunktor.fs2rabbit.effects.MessageEncoder
 import dev.profunktor.fs2rabbit.interpreter.RabbitClient
 import dev.profunktor.fs2rabbit.model.*
 import dev.profunktor.fs2rabbit.model.ExchangeType.Direct
+import dev.rmaiun.learnhttp4s.Learnhttp4sRoutes.SwapSlotCommand
 import dev.rmaiun.learnhttp4s.helper.RabbitHelper
 import dev.rmaiun.learnhttp4s.helper.RabbitHelper.AmqpPublisher
 import fs2.Stream as Fs2Stream
@@ -32,8 +33,9 @@ object Learnhttp4sServer:
 
   def stream[F[_]: Async](switch: SignallingRef[F, Boolean]): Fs2Stream[F, Nothing] = {
     given logger[F[_]: Sync]: Logger[F] = Slf4jLogger.getLogger[F]
-    for
-      structs     <- RabbitHelper.initConnection(RabbitHelper.config)
+    val defaultBrokerCfg                = SwapSlotCommand("localhost", 5672, "dev", "guest", "guest")
+    for {
+      structs     <- RabbitHelper.initConnection(RabbitHelper.reconfig(defaultBrokerCfg))
       publisher   <- Fs2Stream.eval(Ref[F].of(structs.botInPublisher))
       p           <- Fs2Stream.eval(publisher.get)
       _           <- Fs2Stream.eval(p(AmqpMessage("Initial message", AmqpProperties())))
@@ -47,7 +49,7 @@ object Learnhttp4sServer:
           .concurrently(
             structs.botInConsumer.evalTap(x => SomeService.doSomeRepeatableAction("1", x.payload)).interruptWhen(switch)
           )
-    yield exitCode
+    } yield exitCode
   }.drain
 
   def runServer[F[_]: Async](httpApp: HttpApp[F]): Fs2Stream[F, Nothing] = Fs2Stream.resource(
@@ -62,10 +64,10 @@ object Learnhttp4sServer:
 
   def runPingSignals[F[_]: Async](publisher: Ref[F, AmqpPublisher[F]]): Fs2Stream[F, FiniteDuration] =
     val pingFunc: FiniteDuration => F[Unit] = _ =>
-      for
+      for {
         pb <- publisher.get
         _  <- pb(AmqpMessage("ping", new AmqpProperties()))
-      yield ()
+      } yield ()
     Fs2Stream
       .awakeDelay(2 seconds)
       .evalTap(pingFunc)
