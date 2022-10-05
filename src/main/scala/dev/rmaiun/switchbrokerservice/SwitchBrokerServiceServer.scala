@@ -1,10 +1,10 @@
-package dev.rmaiun.learnhttp4s
+package dev.rmaiun.switchbrokerservice
 
 import cats.data.Kleisli
 import cats.effect.*
 import cats.effect.std.Dispatcher
 import cats.syntax.all.*
-import cats.{ Monad, MonadError }
+import cats.{Monad, MonadError}
 import com.comcast.ip4s.*
 import dev.profunktor.fs2rabbit.config.Fs2RabbitConfig
 import dev.profunktor.fs2rabbit.config.declaration.*
@@ -12,9 +12,9 @@ import dev.profunktor.fs2rabbit.effects.MessageEncoder
 import dev.profunktor.fs2rabbit.interpreter.RabbitClient
 import dev.profunktor.fs2rabbit.model.*
 import dev.profunktor.fs2rabbit.model.ExchangeType.Direct
-import dev.rmaiun.learnhttp4s.Learnhttp4sRoutes.SwapSlotCommand
-import dev.rmaiun.learnhttp4s.helper.RabbitHelper
-import dev.rmaiun.learnhttp4s.helper.RabbitHelper.AmqpPublisher
+import SwapSlotRoutes.SwapSlotCommand
+import dev.rmaiun.switchbrokerservice.helper.RabbitHelper.AmqpPublisher
+import dev.rmaiun.switchbrokerservice.helper.RabbitHelper
 import fs2.Stream as Fs2Stream
 import fs2.concurrent.SignallingRef
 import org.http4s.HttpApp
@@ -29,7 +29,7 @@ import java.nio.charset.Charset
 import scala.concurrent.duration.*
 import scala.language.postfixOps
 
-object Learnhttp4sServer:
+object SwitchBrokerServiceServer:
 
   def stream[F[_]: Async](switch: SignallingRef[F, Boolean]): Fs2Stream[F, Nothing] = {
     given logger[F[_]: Sync]: Logger[F] = Slf4jLogger.getLogger[F]
@@ -40,7 +40,7 @@ object Learnhttp4sServer:
       p           <- Fs2Stream.eval(publisher.get)
       _           <- Fs2Stream.eval(p(AmqpMessage("Initial message", AmqpProperties())))
       swapSlotAlg  = SwapSlotService.impl(switch, publisher)
-      httpApp      = (Learnhttp4sRoutes.swapSlotRoutes[F](swapSlotAlg)).orNotFound
+      httpApp      = (SwapSlotRoutes.swapSlotRoutes[F](swapSlotAlg)).orNotFound
       finalHttpApp = MiddlewareLogger.httpApp(true, true)(httpApp)
       exitCode <-
         runServer(finalHttpApp)

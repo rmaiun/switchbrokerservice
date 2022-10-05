@@ -6,7 +6,7 @@ val MunitCatsEffectVersion = "1.0.6"
 lazy val root = (project in file("."))
   .settings(
     organization := "dev.rmaiun",
-    name         := "learnhttp4s",
+    name         := "switchbrokerservice",
     version      := "0.0.1-SNAPSHOT",
     scalaVersion := "3.1.0",
     libraryDependencies ++= Seq(

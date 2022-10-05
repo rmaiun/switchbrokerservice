@@ -1,12 +1,13 @@
-package dev.rmaiun.learnhttp4s
+package dev.rmaiun.switchbrokerservice
 
 import cats.Monad
 import cats.effect.*
 import cats.implicits.*
 import dev.profunktor.fs2rabbit.model.*
-import dev.rmaiun.learnhttp4s.Learnhttp4sRoutes.{ SwapSlotCommand, SwapSlotResult }
-import dev.rmaiun.learnhttp4s.helper.RabbitHelper
-import dev.rmaiun.learnhttp4s.helper.RabbitHelper.{ AmqpPublisher, MonadThrowable }
+import dev.rmaiun.switchbrokerservice.SwapSlotRoutes.{SwapSlotCommand, SwapSlotResult}
+import dev.rmaiun.switchbrokerservice.helper.RabbitHelper.{AmqpPublisher, MonadThrowable}
+import dev.rmaiun.switchbrokerservice.SwapSlotRoutes.{SwapSlotCommand, SwapSlotResult}
+import dev.rmaiun.switchbrokerservice.helper.RabbitHelper
 import fs2.Stream as Fs2Stream
 import fs2.concurrent.SignallingRef
 import org.typelevel.log4cats.Logger

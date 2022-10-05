@@ -1,4 +1,4 @@
-package dev.rmaiun.learnhttp4s.helper
+package dev.rmaiun.switchbrokerservice.helper
 
 import cats.Monad
 import cats.data.Kleisli
@@ -10,7 +10,7 @@ import dev.profunktor.fs2rabbit.effects.MessageEncoder
 import dev.profunktor.fs2rabbit.interpreter.RabbitClient
 import dev.profunktor.fs2rabbit.model.*
 import dev.profunktor.fs2rabbit.model.ExchangeType.Direct
-import dev.rmaiun.learnhttp4s.Learnhttp4sRoutes.SwapSlotCommand
+import dev.rmaiun.switchbrokerservice.SwapSlotRoutes.SwapSlotCommand
 import fs2.Stream as Fs2Stream
 
 import java.nio.charset.Charset

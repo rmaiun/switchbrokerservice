@@ -1,14 +1,14 @@
-package dev.rmaiun.learnhttp4s
+package dev.rmaiun.switchbrokerservice
 
 import cats.effect.{ Async, Concurrent, Sync }
 import cats.implicits.*
-import dev.rmaiun.learnhttp4s.helper.RabbitHelper.MonadThrowable
+import dev.rmaiun.switchbrokerservice.helper.RabbitHelper.MonadThrowable
 import io.circe.{ Decoder, Encoder }
 import org.http4s.circe.*
 import org.http4s.dsl.Http4sDsl
 import org.http4s.{ EntityDecoder, EntityEncoder, HttpRoutes }
 import org.typelevel.log4cats.Logger
-object Learnhttp4sRoutes:
+object SwapSlotRoutes:
   case class SwapSlotCommand(host: String, port: Int, virtualHost: String, user: String, password: String)
   case class SwapSlotResult(success: Boolean)
   given Decoder[SwapSlotCommand]                              = Decoder.derived[SwapSlotCommand]

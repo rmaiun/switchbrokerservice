@@ -1,4 +1,4 @@
-package dev.rmaiun.learnhttp4s
+package dev.rmaiun.switchbrokerservice
 
 import cats.Monad
 import org.typelevel.log4cats.Logger
