@@ -12,7 +12,7 @@ import dev.profunktor.fs2rabbit.effects.MessageEncoder
 import dev.profunktor.fs2rabbit.interpreter.RabbitClient
 import dev.profunktor.fs2rabbit.model.*
 import dev.profunktor.fs2rabbit.model.ExchangeType.Direct
-import SwapSlotRoutes.SwapSlotCommand
+import SwapSlotRoutes.SwitchBrokerCommand
 import dev.rmaiun.switchbrokerservice.helper.RabbitHelper.AmqpPublisher
 import dev.rmaiun.switchbrokerservice.helper.RabbitHelper
 import fs2.Stream as Fs2Stream
@@ -29,17 +29,17 @@ import java.nio.charset.Charset
 import scala.concurrent.duration.*
 import scala.language.postfixOps
 
-object SwitchBrokerServiceServer:
+object SwitchBrokerServer:
 
   def stream[F[_]: Async](switch: SignallingRef[F, Boolean]): Fs2Stream[F, Nothing] = {
     given logger[F[_]: Sync]: Logger[F] = Slf4jLogger.getLogger[F]
-    val defaultBrokerCfg                = SwapSlotCommand("localhost", 5672, "dev", "guest", "guest")
+    val defaultBrokerCfg                = SwitchBrokerCommand("localhost", 5672, "dev", "guest", "guest")
     for {
       structs     <- RabbitHelper.initConnection(RabbitHelper.reconfig(defaultBrokerCfg))
       publisher   <- Fs2Stream.eval(Ref[F].of(structs.botInPublisher))
       p           <- Fs2Stream.eval(publisher.get)
       _           <- Fs2Stream.eval(p(AmqpMessage("Initial message", AmqpProperties())))
-      swapSlotAlg  = SwapSlotService.impl(switch, publisher)
+      swapSlotAlg  = SwitchBrokerService.impl(switch, publisher)
       httpApp      = (SwapSlotRoutes.swapSlotRoutes[F](swapSlotAlg)).orNotFound
       finalHttpApp = MiddlewareLogger.httpApp(true, true)(httpApp)
       exitCode <-

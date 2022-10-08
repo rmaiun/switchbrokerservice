@@ -10,7 +10,7 @@ import dev.profunktor.fs2rabbit.effects.MessageEncoder
 import dev.profunktor.fs2rabbit.interpreter.RabbitClient
 import dev.profunktor.fs2rabbit.model.*
 import dev.profunktor.fs2rabbit.model.ExchangeType.Direct
-import dev.rmaiun.switchbrokerservice.SwapSlotRoutes.SwapSlotCommand
+import dev.rmaiun.switchbrokerservice.SwapSlotRoutes.SwitchBrokerCommand
 import fs2.Stream as Fs2Stream
 
 import java.nio.charset.Charset
@@ -26,7 +26,7 @@ object RabbitHelper:
     botInConsumer: AmqpConsumer[F]
   )(using MC: MonadCancel[F, Throwable])
 
-  def reconfig(dto: SwapSlotCommand): Fs2RabbitConfig = Fs2RabbitConfig(
+  def reconfig(dto: SwitchBrokerCommand): Fs2RabbitConfig = Fs2RabbitConfig(
     virtualHost = dto.virtualHost,
     host = dto.host,
     port = dto.port,

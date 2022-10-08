@@ -7,7 +7,7 @@ object Main extends IOApp.Simple:
   def run: IO[Unit] =
     fs2.Stream
       .eval(SignallingRef[IO, Boolean](false))
-      .flatMap(switch => SwitchBrokerServiceServer.stream[IO](switch))
+      .flatMap(switch => SwitchBrokerServer.stream[IO](switch))
       .compile
       .drain
       .as(ExitCode.Success)

@@ -4,9 +4,9 @@ import cats.Monad
 import cats.effect.*
 import cats.implicits.*
 import dev.profunktor.fs2rabbit.model.*
-import dev.rmaiun.switchbrokerservice.SwapSlotRoutes.{SwapSlotCommand, SwapSlotResult}
+import dev.rmaiun.switchbrokerservice.SwapSlotRoutes.{SwitchBrokerCommand, SwapSlotResult}
 import dev.rmaiun.switchbrokerservice.helper.RabbitHelper.{AmqpPublisher, MonadThrowable}
-import dev.rmaiun.switchbrokerservice.SwapSlotRoutes.{SwapSlotCommand, SwapSlotResult}
+import dev.rmaiun.switchbrokerservice.SwapSlotRoutes.{SwitchBrokerCommand, SwapSlotResult}
 import dev.rmaiun.switchbrokerservice.helper.RabbitHelper
 import fs2.Stream as Fs2Stream
 import fs2.concurrent.SignallingRef
@@ -14,15 +14,15 @@ import org.typelevel.log4cats.Logger
 
 import scala.util.Random
 
-trait SwapSlotService[F[_]]:
-  def swapSlot(dto: SwapSlotCommand): F[SwapSlotResult]
+trait SwitchBrokerService[F[_]]:
+  def swapSlot(dto: SwitchBrokerCommand): F[SwapSlotResult]
 
-object SwapSlotService {
+object SwitchBrokerService {
   def impl[F[_]: Concurrent: Async: Logger](
     switch: SignallingRef[F, Boolean],
     pub: Ref[F, AmqpPublisher[F]]
-  )(using MT: MonadThrowable[F]): SwapSlotService[F] = new SwapSlotService[F] {
-    override def swapSlot(dto: SwapSlotCommand): F[SwapSlotResult] = {
+  )(using MT: MonadThrowable[F]): SwitchBrokerService[F] = new SwitchBrokerService[F] {
+    override def swapSlot(dto: SwitchBrokerCommand): F[SwapSlotResult] = {
       val switchBrokerF = for {
         _      <- refreshSwitch(switch)
         _      <- Concurrent[F].start(processReconnectionToBroker(dto, switch, pub))
@@ -38,9 +38,9 @@ object SwapSlotService {
       switch.update(x => !x) *> switch.update(x => !x)
 
     def processReconnectionToBroker(
-      dto: SwapSlotCommand,
-      switch: SignallingRef[F, Boolean],
-      pub: Ref[F, AmqpPublisher[F]]
+                                     dto: SwitchBrokerCommand,
+                                     switch: SignallingRef[F, Boolean],
+                                     pub: Ref[F, AmqpPublisher[F]]
     ): F[Unit] = {
       val randomInt = Random.nextInt(1000)
       val consumerStream = for {
