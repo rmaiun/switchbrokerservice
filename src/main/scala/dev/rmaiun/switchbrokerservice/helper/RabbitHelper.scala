@@ -3,10 +3,10 @@ package dev.rmaiun.switchbrokerservice.helper
 import cats.Monad
 import cats.data.Kleisli
 import cats.effect.std.Dispatcher
-import cats.effect.{ Async, MonadCancel }
+import cats.effect.{ Async, MonadCancel, Resource }
 import dev.profunktor.fs2rabbit.config.Fs2RabbitConfig
 import dev.profunktor.fs2rabbit.config.declaration.*
-import dev.profunktor.fs2rabbit.effects.MessageEncoder
+import dev.profunktor.fs2rabbit.effects.{ EnvelopeDecoder, MessageEncoder }
 import dev.profunktor.fs2rabbit.interpreter.RabbitClient
 import dev.profunktor.fs2rabbit.model.*
 import dev.profunktor.fs2rabbit.model.ExchangeType.Direct
@@ -22,8 +22,8 @@ object RabbitHelper:
   type MonadThrowable[F[_]] = MonadCancel[F, Throwable]
 
   case class AmqpStructures[F[_]](
-    botInPublisher: AmqpPublisher[F],
-    botInConsumer: AmqpConsumer[F]
+    resultPublisher: AmqpPublisher[F],
+    instructionConsumer: AmqpConsumer[F]
   )(using MC: MonadCancel[F, Throwable])
 
   def reconfig(dto: SwitchBrokerCommand): Fs2RabbitConfig = Fs2RabbitConfig(
@@ -40,58 +40,31 @@ object RabbitHelper:
     automaticRecovery = true
   )
 
-  def initConnection[F[_]: Async](cfg: Fs2RabbitConfig): Fs2Stream[F, AmqpStructures[F]] =
-    for {
-      dispatcher <- Fs2Stream.resource(Dispatcher[F])
-      rc         <- Fs2Stream.eval(RabbitClient[F](cfg, dispatcher))
-      _          <- Fs2Stream.eval(RabbitHelper.initRabbitRoutes(rc))
-      structs    <- RabbitHelper.createRabbitConnection(rc)
-    } yield structs
-
-  private val inputQ      = QueueName("input_q")
-  private val inRK        = RoutingKey("bot_in_rk")
-  private val botExchange = ExchangeName("bot_exchange")
-
-  def initRabbitRoutes[F[_]](rc: RabbitClient[F])(using MC: MonadCancel[F, Throwable]): F[Unit] = {
-    import cats.implicits.*
-    val channel = rc.createConnectionChannel
-    channel.use { ch =>
-      for
-        _ <- rc.declareQueue(DeclarationQueueConfig(inputQ, Durable, NonExclusive, NonAutoDelete, Map()))(ch)
-        _ <-
-          rc.declareExchange(
-            DeclarationExchangeConfig(botExchange, Direct, Durable, NonAutoDelete, NonInternal, Map())
-          )(ch)
-        _ <- rc.bindQueue(inputQ, botExchange, inRK)(ch)
-      yield ()
-    }
-  }
-
-  def createRabbitConnection[F[_]](rc: RabbitClient[F])(using
-    MC: MonadCancel[F, Throwable]
-  ): Fs2Stream[F, AmqpStructures[F]] = {
+  def initRabbitStructs[F[_]: Async](cfg: Fs2RabbitConfig): Fs2Stream[F, AmqpStructures[F]] =
     given stringMessageCodec: Kleisli[F, AmqpMessage[String], AmqpMessage[Array[Byte]]] =
-      Kleisli[F, AmqpMessage[String], AmqpMessage[Array[Byte]]](s =>
-        Monad[F].pure(s.copy(payload = s.payload.getBytes(Charset.defaultCharset())))
-      )
-    for {
-      inPub      <- publisher(inRK, rc)
-      inConsumer <- autoAckConsumer(inputQ, rc)
-    } yield AmqpStructures(inPub, inConsumer)
-  }
+      Kleisli[F, AmqpMessage[String], AmqpMessage[Array[Byte]]](s => Monad[F].pure(s.copy(payload = s.payload.getBytes(Charset.defaultCharset()))))
+    val structs = for
+      dispatcher       <- Dispatcher[F]
+      rc               <- Resource.eval(RabbitClient[F](cfg, dispatcher))
+      publisherChannel <- rc.createConnectionChannel
+      consumerChannel  <- rc.createConnectionChannel
+      publisher        <- Resource.eval(rc.createPublisher[AmqpMessage[String]](instructionEx, instructionRK)(publisherChannel, summon))
+      consumer         <- Resource.eval(rc.createAutoAckConsumer(instructionQ)(consumerChannel, summon))
+    yield AmqpStructures(publisher, consumer)
+    Fs2Stream.resource(structs)
 
-  def autoAckConsumer[F[_]: MonadThrowable](
-    q: QueueName,
-    rc: RabbitClient[F]
-  ): Fs2Stream[F, Fs2Stream[F, AmqpEnvelope[String]]] =
-    Fs2Stream
-      .resource(rc.createConnectionChannel)
-      .flatMap(ch => Fs2Stream.eval(rc.createAutoAckConsumer(q)(ch, summon)))
+  private val instructionQ  = QueueName("instruction_q")
+  private val instructionRK = RoutingKey("instruction_q_rk")
+  private val instructionEx = ExchangeName("instruction_exchange")
 
-  def publisher[F[_]: MonadThrowable](rk: RoutingKey, rc: RabbitClient[F])(using
-    me: MessageEncoder[F, AmqpMessage[String]]
-  ): Fs2Stream[F, AmqpMessage[String] => F[Unit]] =
-    for {
-      ch <- Fs2Stream.resource(rc.createConnectionChannel)
-      x  <- Fs2Stream.eval(rc.createPublisher[AmqpMessage[String]](botExchange, rk)(ch, summon))
-    } yield x
+  def initRabbitRoutes[F[_]: Async](dto: SwitchBrokerCommand): Resource[F, Unit] =
+    import cats.implicits.*
+    for
+      dispatcher <- Dispatcher[F]
+      rc         <- Resource.eval(RabbitClient[F](reconfig(dto), dispatcher))
+      channel    <- rc.createConnectionChannel
+      _          <- Resource.eval(rc.declareQueue(DeclarationQueueConfig(instructionQ, Durable, NonExclusive, NonAutoDelete, Map()))(channel))
+      exchangeCfg = DeclarationExchangeConfig(instructionEx, Direct, Durable, NonAutoDelete, NonInternal, Map())
+      _          <- Resource.eval(rc.declareExchange(exchangeCfg)(channel))
+      _          <- Resource.eval(rc.bindQueue(instructionQ, instructionEx, instructionRK)(channel))
+    yield ()
