@@ -15,14 +15,14 @@ import org.typelevel.log4cats.Logger
 import scala.util.Random
 
 trait SwitchBrokerService[F[_]]:
-  def swapSlot(dto: SwitchBrokerCommand): F[SwapSlotResult]
+  def switchBroker(dto: SwitchBrokerCommand): F[SwapSlotResult]
 
 object SwitchBrokerService:
   def impl[F[_]: Concurrent: Async: Logger](
     switch: SignallingRef[F, Boolean],
     pub: Ref[F, AmqpPublisher[F]]
   )(using MT: MonadThrowable[F]): SwitchBrokerService[F] = new SwitchBrokerService[F]:
-    override def swapSlot(dto: SwitchBrokerCommand): F[SwapSlotResult] =
+    override def switchBroker(dto: SwitchBrokerCommand): F[SwapSlotResult] =
       val switchBrokerF = for
         _      <- refreshSwitch(switch)
         _      <- Concurrent[F].start(processReconnectionToBroker(dto, switch, pub))
@@ -41,10 +41,10 @@ object SwitchBrokerService:
     ): F[Unit] =
       val randomInt = Random.nextInt(1000)
       val consumerStream = for
-        structs <- RabbitHelper.initConnection(RabbitHelper.reconfig(dto))
+        structs <- RabbitHelper.initRabbitStructs(RabbitHelper.reconfig(dto))
         _       <- Fs2Stream.eval(pub.update(_ => structs.resultPublisher))
         consumer <- structs.instructionConsumer
-                      .evalTap(msg => SomeService.doSomeRepeatableAction(randomInt.toString, msg.payload))
+                      .evalTap(msg => LogService.logPingResult(randomInt.toString, msg.payload))
                       .interruptWhen(switch)
       yield consumer
       consumerStream.compile.drain

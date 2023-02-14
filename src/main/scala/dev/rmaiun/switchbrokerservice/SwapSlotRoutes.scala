@@ -17,14 +17,14 @@ object SwapSlotRoutes:
   given [F[_]]: EntityEncoder[F, SwapSlotResult]                     = jsonEncoderOf
 
   def swapSlotRoutes[F[_]: Async: Concurrent: Logger: MonadThrowable](
-    swapSlotService: SwitchBrokerService[F]
+    switchBrokerService: SwitchBrokerService[F]
   ): HttpRoutes[F] =
     val dsl = new Http4sDsl[F] {}
     import dsl.*
-    HttpRoutes.of[F] { case req @ POST -> Root / "slot" / "swap" =>
+    HttpRoutes.of[F] { case req @ POST -> Root / "broker" / "switch" =>
       for
         body   <- req.as[SwitchBrokerCommand]
-        result <- swapSlotService.swapSlot(body)
+        result <- switchBrokerService.switchBroker(body)
         resp   <- Ok(result)
       yield resp
     }

@@ -46,7 +46,7 @@ object SwitchBrokerServer:
           .concurrently(runPingSignals(publisherRef))
           .concurrently(
             structs.instructionConsumer
-              .evalTap(x => SomeService.doSomeRepeatableAction("1", x.payload))
+              .evalTap(x => LogService.logPingResult("1", x.payload))
               .interruptWhen(switch)
           )
     yield exitCode
