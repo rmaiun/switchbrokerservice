@@ -1,9 +1,0 @@
-package dev.rmaiun.switchbrokerservice
-
-import cats.Monad
-import org.typelevel.log4cats.Logger
-import cats.implicits.*
-
-object LogService:
-  def logPingResult[F[_]: Monad: Logger](marker: String, msg: String): F[Unit] =
-    Logger[F].info(s"Action was triggered [$marker] $msg") *> Monad[F].pure(())

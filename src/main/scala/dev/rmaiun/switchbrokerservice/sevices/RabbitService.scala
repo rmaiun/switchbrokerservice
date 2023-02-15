@@ -1,28 +1,28 @@
-package dev.rmaiun.switchbrokerservice.helper
+package dev.rmaiun.switchbrokerservice.sevices
 
 import cats.Monad
 import cats.data.Kleisli
 import cats.effect.std.Dispatcher
-import cats.effect.{ Async, MonadCancel, Resource }
+import cats.effect.{Async, MonadCancel, Resource}
 import dev.profunktor.fs2rabbit.config.Fs2RabbitConfig
 import dev.profunktor.fs2rabbit.config.declaration.*
-import dev.profunktor.fs2rabbit.effects.{ EnvelopeDecoder, MessageEncoder }
+import dev.profunktor.fs2rabbit.effects.{EnvelopeDecoder, MessageEncoder}
 import dev.profunktor.fs2rabbit.interpreter.RabbitClient
 import dev.profunktor.fs2rabbit.model.*
 import dev.profunktor.fs2rabbit.model.ExchangeType.Direct
-import dev.rmaiun.switchbrokerservice.SwapSlotRoutes.SwitchBrokerCommand
+import dev.rmaiun.switchbrokerservice.SwitchBrokerRoutes.SwitchBrokerCommand
 import fs2.Stream as Fs2Stream
 
 import java.nio.charset.Charset
 import scala.concurrent.duration.*
 
-object RabbitHelper:
+object RabbitService:
   type AmqpPublisher[F[_]]  = AmqpMessage[String] => F[Unit]
   type AmqpConsumer[F[_]]   = Fs2Stream[F, AmqpEnvelope[String]]
   type MonadThrowable[F[_]] = MonadCancel[F, Throwable]
 
   case class AmqpStructures[F[_]](
-    resultPublisher: AmqpPublisher[F],
+    instructionPublisher: AmqpPublisher[F],
     instructionConsumer: AmqpConsumer[F]
   )(using MC: MonadCancel[F, Throwable])
 
@@ -40,9 +40,10 @@ object RabbitHelper:
     automaticRecovery = true
   )
 
+  given stringMessageCodec[F[_]: Monad]: Kleisli[F, AmqpMessage[String], AmqpMessage[Array[Byte]]] =
+    Kleisli[F, AmqpMessage[String], AmqpMessage[Array[Byte]]](s => Monad[F].pure(s.copy(payload = s.payload.getBytes(Charset.defaultCharset()))))
+
   def initRabbitStructs[F[_]: Async](cfg: Fs2RabbitConfig): Fs2Stream[F, AmqpStructures[F]] =
-    given stringMessageCodec: Kleisli[F, AmqpMessage[String], AmqpMessage[Array[Byte]]] =
-      Kleisli[F, AmqpMessage[String], AmqpMessage[Array[Byte]]](s => Monad[F].pure(s.copy(payload = s.payload.getBytes(Charset.defaultCharset()))))
     val structs = for
       dispatcher       <- Dispatcher[F]
       rc               <- Resource.eval(RabbitClient[F](cfg, dispatcher))
