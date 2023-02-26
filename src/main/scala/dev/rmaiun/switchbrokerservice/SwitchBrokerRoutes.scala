@@ -11,11 +11,11 @@ import org.http4s.{EntityDecoder, EntityEncoder, HttpRoutes}
 import org.typelevel.log4cats.Logger
 object SwitchBrokerRoutes:
   case class SwitchBrokerCommand(host: String, port: Int, virtualHost: String, user: String, password: String)
-  case class SwapSlotResult(success: Boolean)
+  case class SwitchBrokerResult(success: Boolean)
   given Decoder[SwitchBrokerCommand]                                 = Decoder.derived[SwitchBrokerCommand]
   given [F[_]: Concurrent, T]: EntityDecoder[F, SwitchBrokerCommand] = jsonOf
-  given Encoder[SwapSlotResult]                                      = Encoder.AsObject.derived[SwapSlotResult]
-  given [F[_]]: EntityEncoder[F, SwapSlotResult]                     = jsonEncoderOf
+  given Encoder[SwitchBrokerResult]                                      = Encoder.AsObject.derived[SwitchBrokerResult]
+  given [F[_]]: EntityEncoder[F, SwitchBrokerResult]                     = jsonEncoderOf
 
   def swapSlotRoutes[F[_]: Async: Concurrent: Logger: MonadThrowable](
     switchBrokerService: SwitchBrokerService[F]

@@ -4,7 +4,7 @@ import cats.Monad
 import cats.effect.*
 import cats.implicits.*
 import dev.profunktor.fs2rabbit.model.*
-import dev.rmaiun.switchbrokerservice.SwitchBrokerRoutes.{ SwapSlotResult, SwitchBrokerCommand }
+import dev.rmaiun.switchbrokerservice.SwitchBrokerRoutes.{ SwitchBrokerResult, SwitchBrokerCommand }
 import dev.rmaiun.switchbrokerservice.sevices.RabbitService.{ AmqpPublisher, MonadThrowable }
 import dev.rmaiun.switchbrokerservice.sevices.{ RabbitService, SwitchBrokerService }
 import fs2.Stream as Fs2Stream
@@ -15,19 +15,19 @@ import scala.concurrent.duration.{ DurationInt, FiniteDuration }
 import scala.language.postfixOps
 import scala.util.Random
 trait SwitchBrokerService[F[_]]:
-  def switchBroker(dto: SwitchBrokerCommand): F[SwapSlotResult]
+  def switchBroker(dto: SwitchBrokerCommand): F[SwitchBrokerResult]
 
 object SwitchBrokerService:
   def impl[F[_]: Concurrent: Async: Logger](
     switch: SignallingRef[F, Boolean],
     pub: Ref[F, AmqpPublisher[F]]
   )(using MT: MonadThrowable[F]): SwitchBrokerService[F] = new SwitchBrokerService[F]:
-    override def switchBroker(dto: SwitchBrokerCommand): F[SwapSlotResult] =
+    override def switchBroker(dto: SwitchBrokerCommand): F[SwitchBrokerResult] =
       val switchBrokerF = for
         _ <- refreshSwitch(switch)
         _ <- Concurrent[F].start(processReconnectionToBroker(dto, switch, pub))
-      yield SwapSlotResult(true)
-      MT.handleErrorWith(switchBrokerF)(_ => MT.pure(SwapSlotResult(false)))
+      yield SwitchBrokerResult(true)
+      MT.handleErrorWith(switchBrokerF)(_ => MT.pure(SwitchBrokerResult(false)))
 
     def refreshSwitch(switch: SignallingRef[F, Boolean]): F[Unit] =
       switch.update(x => !x) *> switch.update(x => !x)
