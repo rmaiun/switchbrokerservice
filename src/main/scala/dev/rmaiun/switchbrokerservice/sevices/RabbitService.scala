@@ -15,6 +15,7 @@ import fs2.Stream as Fs2Stream
 
 import java.nio.charset.Charset
 import scala.concurrent.duration.*
+import scala.language.postfixOps
 
 object RabbitService:
   type AmqpPublisher[F[_]]  = AmqpMessage[String] => F[Unit]
@@ -24,15 +25,15 @@ object RabbitService:
   case class AmqpStructures[F[_]](
     instructionPublisher: AmqpPublisher[F],
     instructionConsumer: AmqpConsumer[F]
-  )(using MC: MonadCancel[F, Throwable])
+  )
 
   def reconfig(dto: SwitchBrokerCommand): Fs2RabbitConfig = Fs2RabbitConfig(
     virtualHost = dto.virtualHost,
-    host = dto.host,
-    port = dto.port,
-    connectionTimeout = 5000.seconds,
-    username = Some(dto.user),
-    password = Some(dto.password),
+    host = "localhost",
+    port = 5672,
+    connectionTimeout = 5 seconds,
+    username = Some("guest"),
+    password = Some("guest"),
     ssl = false,
     requeueOnNack = false,
     requeueOnReject = false,
@@ -58,9 +59,9 @@ object RabbitService:
   private val instructionRK = RoutingKey("instruction_q_rk")
   private val instructionEx = ExchangeName("instruction_exchange")
 
-  def initRabbitRoutes[F[_]: Async](dto: SwitchBrokerCommand): Resource[F, Unit] =
+  def initRabbitRoutes[F[_]: Async](dto: SwitchBrokerCommand): Fs2Stream[F, Unit] =
     import cats.implicits.*
-    for
+    val effect = for
       dispatcher <- Dispatcher[F]
       rc         <- Resource.eval(RabbitClient[F](reconfig(dto), dispatcher))
       channel    <- rc.createConnectionChannel
@@ -69,3 +70,4 @@ object RabbitService:
       _          <- Resource.eval(rc.declareExchange(exchangeCfg)(channel))
       _          <- Resource.eval(rc.bindQueue(instructionQ, instructionEx, instructionRK)(channel))
     yield ()
+    Fs2Stream.resource(effect)

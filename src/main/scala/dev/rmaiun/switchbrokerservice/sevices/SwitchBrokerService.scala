@@ -4,14 +4,15 @@ import cats.Monad
 import cats.effect.*
 import cats.implicits.*
 import dev.profunktor.fs2rabbit.model.*
-import dev.rmaiun.switchbrokerservice.SwitchBrokerRoutes.{ SwitchBrokerResult, SwitchBrokerCommand }
-import dev.rmaiun.switchbrokerservice.sevices.RabbitService.{ AmqpPublisher, MonadThrowable }
-import dev.rmaiun.switchbrokerservice.sevices.{ RabbitService, SwitchBrokerService }
+import dev.rmaiun.switchbrokerservice.SwitchBrokerRoutes.{SwitchBrokerCommand, SwitchBrokerResult}
+import dev.rmaiun.switchbrokerservice.sevices.RabbitService.{AmqpPublisher, MonadThrowable}
+import dev.rmaiun.switchbrokerservice.sevices.{RabbitService, SwitchBrokerService}
 import fs2.Stream as Fs2Stream
 import fs2.concurrent.SignallingRef
 import org.typelevel.log4cats.Logger
 
-import scala.concurrent.duration.{ DurationInt, FiniteDuration }
+import java.time.LocalDateTime
+import scala.concurrent.duration.{DurationInt, FiniteDuration}
 import scala.language.postfixOps
 import scala.util.Random
 trait SwitchBrokerService[F[_]]:
@@ -26,8 +27,8 @@ object SwitchBrokerService:
       val switchBrokerF = for
         _ <- refreshSwitch(switch)
         _ <- Concurrent[F].start(processReconnectionToBroker(dto, switch, pub))
-      yield SwitchBrokerResult(true)
-      MT.handleErrorWith(switchBrokerF)(_ => MT.pure(SwitchBrokerResult(false)))
+      yield SwitchBrokerResult(LocalDateTime.now())
+      MT.handleErrorWith(switchBrokerF)(_ => MT.pure(SwitchBrokerResult(LocalDateTime.now())))
 
     def refreshSwitch(switch: SignallingRef[F, Boolean]): F[Unit] =
       switch.update(x => !x) *> switch.update(x => !x)

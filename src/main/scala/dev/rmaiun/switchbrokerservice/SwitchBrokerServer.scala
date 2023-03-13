@@ -33,13 +33,13 @@ object SwitchBrokerServer:
 
   def stream[F[_]: Async](switch: SignallingRef[F, Boolean]): Fs2Stream[F, Nothing] = {
     given logger: Logger[F] = Slf4jLogger.getLogger[F]
-    val defaultBrokerCfg    = SwitchBrokerCommand("localhost", 5672, "dev", "guest", "guest")
+    val defaultBrokerCfg    = SwitchBrokerCommand("dev")
     for
-      _            <- Fs2Stream.resource(RabbitService.initRabbitRoutes(defaultBrokerCfg))
+      _            <- RabbitService.initRabbitRoutes(defaultBrokerCfg)
       structs      <- RabbitService.initRabbitStructs(RabbitService.reconfig(defaultBrokerCfg))
       publisherRef <- Fs2Stream.eval(Ref[F].of(structs.instructionPublisher))
-      swapSlotAlg   = SwitchBrokerService.impl(switch, publisherRef)
-      httpApp       = (SwitchBrokerRoutes.swapSlotRoutes[F](swapSlotAlg)).orNotFound
+      service   = SwitchBrokerService.impl(switch, publisherRef)
+      httpApp       = (SwitchBrokerRoutes.swapSlotRoutes[F](service)).orNotFound
       finalHttpApp  = MiddlewareLogger.httpApp(true, true)(httpApp)
       exitCode <-
         runServer(finalHttpApp)
