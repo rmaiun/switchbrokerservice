@@ -3,14 +3,14 @@ package dev.rmaiun.switchbrokerservice.sevices
 import cats.Monad
 import cats.data.Kleisli
 import cats.effect.std.Dispatcher
-import cats.effect.{Async, MonadCancel, Resource}
+import cats.effect.{ Async, MonadCancel, Resource }
 import dev.profunktor.fs2rabbit.config.Fs2RabbitConfig
 import dev.profunktor.fs2rabbit.config.declaration.*
-import dev.profunktor.fs2rabbit.effects.{EnvelopeDecoder, MessageEncoder}
+import dev.profunktor.fs2rabbit.effects.{ EnvelopeDecoder, MessageEncoder }
 import dev.profunktor.fs2rabbit.interpreter.RabbitClient
 import dev.profunktor.fs2rabbit.model.*
 import dev.profunktor.fs2rabbit.model.ExchangeType.Direct
-import dev.rmaiun.switchbrokerservice.SwitchBrokerRoutes.SwitchBrokerCommand
+import dev.rmaiun.switchbrokerservice.SwitchBrokerRoutes.SwitchVirtualHostCommand
 import fs2.Stream as Fs2Stream
 
 import java.nio.charset.Charset
@@ -27,7 +27,7 @@ object RabbitService:
     instructionConsumer: AmqpConsumer[F]
   )
 
-  def reconfig(dto: SwitchBrokerCommand): Fs2RabbitConfig = Fs2RabbitConfig(
+  def reconfig(dto: SwitchVirtualHostCommand): Fs2RabbitConfig = Fs2RabbitConfig(
     virtualHost = dto.virtualHost,
     host = "localhost",
     port = 5672,
@@ -59,7 +59,7 @@ object RabbitService:
   private val instructionRK = RoutingKey("instruction_q_rk")
   private val instructionEx = ExchangeName("instruction_exchange")
 
-  def initRabbitRoutes[F[_]: Async](dto: SwitchBrokerCommand): Fs2Stream[F, Unit] =
+  def initRabbitRoutes[F[_]: Async](dto: SwitchVirtualHostCommand): Fs2Stream[F, Unit] =
     import cats.implicits.*
     val effect = for
       dispatcher <- Dispatcher[F]
