@@ -21,13 +21,15 @@ trait SwitchVirtualHostService[F[_]]:
 object SwitchVirtualHostService:
   def impl[F[_]: Concurrent: Async: Logger](
     switch: SignallingRef[F, Boolean],
-    pub: Ref[F, AmqpPublisher[F]]
+    pub: Ref[F, AmqpPublisher[F]],
+    fibers: Ref[F, List[Fiber[F, Throwable, Unit]]]
   )(using MT: MonadThrowable[F]): SwitchVirtualHostService[F] = new SwitchVirtualHostService[F]:
 
     override def switchBroker(dto: SwitchVirtualHostCommand): F[SwitchBrokerResult] =
       val switchBrokerF = for
-        _ <- refreshSwitch(switch)
-        _ <- Concurrent[F].start(processReconnectionToBroker(dto, switch, pub))
+        _     <- refreshSwitch(switch)
+        fiber <- Concurrent[F].start(processReconnectionToBroker(dto, switch, pub))
+        _     <- fibers.update(list => fiber :: list)
       yield SwitchBrokerResult(LocalDateTime.now())
       MT.handleErrorWith(switchBrokerF)(err =>
         Logger[F].error(err)(s"Error while switch to ${dto.virtualHost} vhost") *>
@@ -49,6 +51,7 @@ object SwitchVirtualHostService:
         consumer <- structs.instructionConsumer
                       .evalTap(msg => LogService.logPingResult(msg.payload))
                       .interruptWhen(switch)
+                      .onFinalize(RabbitService.closeConnection(structs))
       yield consumer
       consumerStream
         .concurrently(runPingSignals(pub, switch))

@@ -16,7 +16,7 @@ import fs2.Stream as Fs2Stream
 import java.nio.charset.Charset
 import scala.concurrent.duration.*
 import scala.language.postfixOps
-
+import cats.implicits.*
 object RabbitService:
   type AmqpPublisher[F[_]]  = AmqpMessage[String] => F[Unit]
   type AmqpConsumer[F[_]]   = Fs2Stream[F, AmqpEnvelope[String]]
@@ -24,7 +24,8 @@ object RabbitService:
 
   case class AmqpStructures[F[_]](
     instructionPublisher: AmqpPublisher[F],
-    instructionConsumer: AmqpConsumer[F]
+    instructionConsumer: AmqpConsumer[F],
+    connections: List[AMQPConnection]
   )
 
   def reconfig(dto: SwitchVirtualHostCommand): Fs2RabbitConfig = Fs2RabbitConfig(
@@ -48,11 +49,13 @@ object RabbitService:
     val structs = for
       dispatcher       <- Dispatcher[F]
       rc               <- Resource.eval(RabbitClient[F](cfg, dispatcher))
-      publisherChannel <- rc.createConnectionChannel
-      consumerChannel  <- rc.createConnectionChannel
+      conn1            <- rc.createConnection
+      conn2            <- rc.createConnection
+      publisherChannel <- rc.createChannel(conn1)
+      consumerChannel  <- rc.createChannel(conn2)
       publisher        <- Resource.eval(rc.createPublisher[AmqpMessage[String]](instructionEx, instructionRK)(publisherChannel, summon))
       consumer         <- Resource.eval(rc.createAutoAckConsumer(instructionQ)(consumerChannel, summon))
-    yield AmqpStructures(publisher, consumer)
+    yield AmqpStructures(publisher, consumer, List(conn1, conn2))
     Fs2Stream.resource(structs)
 
   private val instructionQ  = QueueName("instruction_q")
@@ -69,5 +72,15 @@ object RabbitService:
       exchangeCfg = DeclarationExchangeConfig(instructionEx, Direct, Durable, NonAutoDelete, NonInternal, Map())
       _          <- Resource.eval(rc.declareExchange(exchangeCfg)(channel))
       _          <- Resource.eval(rc.bindQueue(instructionQ, instructionEx, instructionRK)(channel))
-    yield ()
-    Fs2Stream.resource(effect)
+    yield channel
+    Fs2Stream.eval(effect.use_)
+
+  def closeConnection[F[_]: Async](structs: AmqpStructures[F]): F[Unit] =
+    structs.connections
+      .map(conn =>
+        Async[F].delay {
+          conn.value.close()
+          ()
+        }
+      )
+      .sequence_
