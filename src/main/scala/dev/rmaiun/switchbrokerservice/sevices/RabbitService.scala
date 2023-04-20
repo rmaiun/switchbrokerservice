@@ -17,6 +17,8 @@ import java.nio.charset.Charset
 import scala.concurrent.duration.*
 import scala.language.postfixOps
 import cats.implicits.*
+
+import scala.util.Try
 object RabbitService:
   type AmqpPublisher[F[_]]  = AmqpMessage[String] => F[Unit]
   type AmqpConsumer[F[_]]   = Fs2Stream[F, AmqpEnvelope[String]]
@@ -32,7 +34,7 @@ object RabbitService:
     virtualHost = dto.virtualHost,
     host = "localhost",
     port = 5672,
-    connectionTimeout = 5 seconds,
+    connectionTimeout = 2 seconds,
     username = Some("guest"),
     password = Some("guest"),
     ssl = false,
@@ -79,7 +81,7 @@ object RabbitService:
     structs.connections
       .map(conn =>
         Async[F].delay {
-          conn.value.close()
+          Try(conn.value.close())
           ()
         }
       )
