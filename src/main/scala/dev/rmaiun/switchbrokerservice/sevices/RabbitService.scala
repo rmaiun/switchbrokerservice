@@ -77,8 +77,8 @@ object RabbitService:
     yield channel
     Fs2Stream.eval(effect.use_)
 
-  def closeConnection[F[_]: Async](structs: AmqpStructures[F]): F[Unit] =
-    structs.connections
+  def closeConnection[F[_]: Async](connections: List[AMQPConnection]): F[Unit] =
+    connections
       .map(conn =>
         Async[F].delay {
           Try(conn.value.close())

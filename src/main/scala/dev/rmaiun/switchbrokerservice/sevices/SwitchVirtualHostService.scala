@@ -23,13 +23,16 @@ trait SwitchVirtualHostService[F[_]]:
 object SwitchVirtualHostService:
   def impl[F[_]: Concurrent: Async: Logger](
     switch: SignallingRef[F, Boolean],
-    pub: Ref[F, AmqpPublisher[F]]
+    pub: Ref[F, AmqpPublisher[F]],
+    connections: Ref[F, List[AMQPConnection]]
   )(using MT: MonadThrowable[F]): SwitchVirtualHostService[F] = new SwitchVirtualHostService[F]:
 
     override def switchBroker(dto: SwitchVirtualHostCommand): F[SwitchBrokerResult] =
       val switchBrokerF = for
+        conns <- connections.get
         _ <- refreshSwitch(switch)
-        _ <- Concurrent[F].start(processReconnectionToBroker(dto, switch, pub))
+        _ <- RabbitService.closeConnection(conns)
+        _ <- Concurrent[F].start(processReconnectionToBroker(dto, switch, pub, connections))
       yield SwitchBrokerResult(LocalDateTime.now())
       MT.handleErrorWith(switchBrokerF)(err =>
         Logger[F].error(err)(s"Error while switch to ${dto.virtualHost} vhost") *>
@@ -42,16 +45,16 @@ object SwitchVirtualHostService:
     private def processReconnectionToBroker(
       dto: SwitchVirtualHostCommand,
       switch: SignallingRef[F, Boolean],
-      pub: Ref[F, AmqpPublisher[F]]
+      pub: Ref[F, AmqpPublisher[F]],
+      connections: Ref[F, List[AMQPConnection]]
     ): F[Unit] =
-      val runnable: AmqpStructures[F] => Runnable = structs => () => Try(structs.connections.foreach(c => c.value.abort()))
       val consumerStream = for
         structs <- RabbitService.initRabbitStructs(RabbitService.reconfig(dto))
-        _       <- Fs2Stream.eval(pub.update(_ => structs.instructionPublisher))
+        _       <- Fs2Stream.eval(pub.set(structs.instructionPublisher))
         consumer <- structs.instructionConsumer
                       .evalTap(msg => LogService.logPingResult(msg.payload))
                       .interruptWhen(switch)
-                      .onFinalize(RabbitService.closeConnection(structs))
+        _ <- Fs2Stream.eval(connections.set(structs.connections))
       yield consumer
       consumerStream
         .concurrently(runPingSignals(pub, switch))

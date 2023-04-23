@@ -38,7 +38,8 @@ object SwitchBrokerServer:
       _            <- RabbitService.initRabbitRoutes(defaultBrokerCfg)
       structs      <- RabbitService.initRabbitStructs(RabbitService.reconfig(defaultBrokerCfg)) // (1)
       publisherRef <- Fs2Stream.eval(Ref[F].of(structs.instructionPublisher))                   // (2)
-      service       = SwitchVirtualHostService.impl(switch, publisherRef)                       // (3)
+      connectionsRef <- Fs2Stream.eval(Ref[F].of(structs.connections))                   // (2)
+      service       = SwitchVirtualHostService.impl(switch, publisherRef, connectionsRef)                       // (3)
       httpApp       = (SwitchBrokerRoutes.switchVirtualHostRoutes[F](service)).orNotFound
       finalHttpApp  = MiddlewareLogger.httpApp(true, true)(httpApp)
       exitCode <-
@@ -48,7 +49,6 @@ object SwitchBrokerServer:
             structs.instructionConsumer // (5)
               .evalTap(x => LogService.logPingResult(x.payload))
               .interruptWhen(switch)
-              .onFinalize(RabbitService.closeConnection(structs))
           )
     yield exitCode
   }.drain
