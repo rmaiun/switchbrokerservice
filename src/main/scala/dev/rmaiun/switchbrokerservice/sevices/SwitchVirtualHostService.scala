@@ -35,7 +35,7 @@ object SwitchVirtualHostService:
         _       <- refreshSwitch(switch)
         _       <- Logger[F].info("Switch is refreshed")
         _       <- Logger[F].info("Old connections are closed")
-        _       <- Concurrent[F].delay(processReconnectionToBroker(dto, switch, structsRef))
+        _       <- Concurrent[F].start(processReconnectionToBroker(dto, switch, structsRef))
         _       <- Logger[F].info("Broker is reconnected")
       yield SwitchBrokerResult(LocalDateTime.now())
       MT.handleErrorWith(switchBrokerF)(err =>
