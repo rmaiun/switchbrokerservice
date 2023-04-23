@@ -3,10 +3,10 @@ package dev.rmaiun.switchbrokerservice.sevices
 import cats.Monad
 import cats.data.Kleisli
 import cats.effect.std.Dispatcher
-import cats.effect.{ Async, MonadCancel, Resource }
+import cats.effect.{Async, MonadCancel, Resource, Sync}
 import dev.profunktor.fs2rabbit.config.Fs2RabbitConfig
 import dev.profunktor.fs2rabbit.config.declaration.*
-import dev.profunktor.fs2rabbit.effects.{ EnvelopeDecoder, MessageEncoder }
+import dev.profunktor.fs2rabbit.effects.{EnvelopeDecoder, MessageEncoder}
 import dev.profunktor.fs2rabbit.interpreter.RabbitClient
 import dev.profunktor.fs2rabbit.model.*
 import dev.profunktor.fs2rabbit.model.ExchangeType.Direct
@@ -17,7 +17,9 @@ import java.nio.charset.Charset
 import scala.concurrent.duration.*
 import scala.language.postfixOps
 import cats.implicits.*
+import org.typelevel.log4cats.Logger
 
+import java.util.UUID
 import scala.util.Try
 object RabbitService:
   type AmqpPublisher[F[_]]  = AmqpMessage[String] => F[Unit]
@@ -34,7 +36,7 @@ object RabbitService:
     virtualHost = dto.virtualHost,
     host = "localhost",
     port = 5672,
-    connectionTimeout = 2 seconds,
+    connectionTimeout = 5 seconds,
     username = Some("guest"),
     password = Some("guest"),
     ssl = false,
@@ -47,9 +49,8 @@ object RabbitService:
   given stringMessageCodec[F[_]: Monad]: Kleisli[F, AmqpMessage[String], AmqpMessage[Array[Byte]]] =
     Kleisli[F, AmqpMessage[String], AmqpMessage[Array[Byte]]](s => Monad[F].pure(s.copy(payload = s.payload.getBytes(Charset.defaultCharset()))))
 
-  def initRabbitStructs[F[_]: Async](cfg: Fs2RabbitConfig): Fs2Stream[F, AmqpStructures[F]] =
+  def initRabbitStructs[F[_]: Async](cfg: Fs2RabbitConfig)(dispatcher: Dispatcher[F]): Fs2Stream[F, AmqpStructures[F]] =
     val structs = for
-      dispatcher       <- Dispatcher[F]
       rc               <- Resource.eval(RabbitClient[F](cfg, dispatcher))
       conn1            <- rc.createConnection
       conn2            <- rc.createConnection
@@ -57,17 +58,25 @@ object RabbitService:
       consumerChannel  <- rc.createChannel(conn2)
       publisher        <- Resource.eval(rc.createPublisher[AmqpMessage[String]](instructionEx, instructionRK)(publisherChannel, summon))
       consumer         <- Resource.eval(rc.createAutoAckConsumer(instructionQ)(consumerChannel, summon))
-    yield AmqpStructures(publisher, consumer, List(conn1, conn2))
+    yield
+      val con1Id = UUID.randomUUID().toString
+      val con2Id = UUID.randomUUID().toString
+      println(con1Id)
+      println(con2Id)
+      println(s"publisherChannel isOpen ${publisherChannel.value.isOpen}")
+      println(s"consumerChannel isOpen ${consumerChannel.value.isOpen}")
+      conn1.value.setId(con1Id)
+      conn2.value.setId(con2Id)
+      AmqpStructures(publisher, consumer, List(conn1, conn2))
     Fs2Stream.resource(structs)
 
   private val instructionQ  = QueueName("instruction_q")
   private val instructionRK = RoutingKey("instruction_q_rk")
   private val instructionEx = ExchangeName("instruction_exchange")
 
-  def initRabbitRoutes[F[_]: Async](dto: SwitchVirtualHostCommand): Fs2Stream[F, Unit] =
+  def initRabbitRoutes[F[_]: Async](dto: SwitchVirtualHostCommand)(dispatcher: Dispatcher[F]): Fs2Stream[F, Unit] =
     import cats.implicits.*
     val effect = for
-      dispatcher <- Dispatcher[F]
       rc         <- Resource.eval(RabbitClient[F](reconfig(dto), dispatcher))
       channel    <- rc.createConnectionChannel
       _          <- Resource.eval(rc.declareQueue(DeclarationQueueConfig(instructionQ, Durable, NonExclusive, NonAutoDelete, Map()))(channel))
@@ -77,10 +86,10 @@ object RabbitService:
     yield channel
     Fs2Stream.eval(effect.use_)
 
-  def closeConnection[F[_]: Async](structs: AmqpStructures[F]): F[Unit] =
+  def closeConnection[F[_]: Async:Logger](structs: AmqpStructures[F]): F[Unit] =
     structs.connections
       .map(conn =>
-        Async[F].delay {
+        Logger[F].info(s"Closing ${conn.value.getId} connection") *> Sync[F].delay {
           Try(conn.value.close())
           ()
         }

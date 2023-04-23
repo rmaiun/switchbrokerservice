@@ -35,20 +35,21 @@ object SwitchBrokerServer:
     given logger: Logger[F] = Slf4jLogger.getLogger[F]
     val defaultBrokerCfg    = SwitchVirtualHostCommand("test")
     for
-      _            <- RabbitService.initRabbitRoutes(defaultBrokerCfg)
-      structs      <- RabbitService.initRabbitStructs(RabbitService.reconfig(defaultBrokerCfg)) // (1)
-      publisherRef <- Fs2Stream.eval(Ref[F].of(structs.instructionPublisher))                   // (2)
-      service       = SwitchVirtualHostService.impl(switch, publisherRef)                       // (3)
+      dispatcher       <- Fs2Stream.resource(Dispatcher[F])
+      _            <- RabbitService.initRabbitRoutes(defaultBrokerCfg)(dispatcher)
+      structs      <- RabbitService.initRabbitStructs(RabbitService.reconfig(defaultBrokerCfg))(dispatcher) // (1)
+      structsRef <- Fs2Stream.eval(Ref[F].of(structs)) // (2)
+      service       = SwitchVirtualHostService.impl(switch, structsRef, dispatcher) // (3)
       httpApp       = (SwitchBrokerRoutes.switchVirtualHostRoutes[F](service)).orNotFound
       finalHttpApp  = MiddlewareLogger.httpApp(true, true)(httpApp)
       exitCode <-
         runServer(finalHttpApp)                               // (3)
-          .concurrently(runPingSignals(publisherRef, switch)) // (4)
+          .concurrently(runPingSignals(structs.instructionPublisher, switch)) // (4)
           .concurrently(
             structs.instructionConsumer // (5)
               .evalTap(x => LogService.logPingResult(x.payload))
               .interruptWhen(switch)
-              .onFinalize(RabbitService.closeConnection(structs))
+              .onFinalize(Logger[F].info("Initial instruction consumer is finalized"))
           )
     yield exitCode
   }.drain
@@ -63,10 +64,12 @@ object SwitchBrokerServer:
       Resource.eval(Async[F].never)
   )
 
-  private def runPingSignals[F[_]: Async](publisher: Ref[F, AmqpPublisher[F]], switch: SignallingRef[F, Boolean]): Fs2Stream[F, FiniteDuration] =
+  private def runPingSignals[F[_]: Async:Logger](publisher: AmqpPublisher[F], switch: SignallingRef[F, Boolean]): Fs2Stream[F, FiniteDuration] =
     Fs2Stream
       .awakeDelay(2 seconds)
-      .evalTap(_ => publisher.get.flatMap(pb => pb(AmqpMessage("init", new AmqpProperties()))))
+      .evalTap(_ =>  publisher(AmqpMessage("init", new AmqpProperties())))
       .interruptWhen(switch)
+      .onFinalize(Logger[F].info("Initial runPingSignals is finalized"))
+
 
 end SwitchBrokerServer
