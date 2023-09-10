@@ -17,7 +17,7 @@ lazy val root = (project in file("."))
       "org.scalameta"  %% "munit"               % MunitVersion           % Test,
       "org.typelevel"  %% "munit-cats-effect-3" % MunitCatsEffectVersion % Test,
       "ch.qos.logback"  % "logback-classic"     % LogbackVersion,
-      "dev.profunktor" %% "fs2-rabbit"          % "4.1.1"
+      "dev.profunktor" %% "fs2-rabbit"          % "5.0.0"
     ),
     testFrameworks += new TestFramework("munit.Framework")
   )

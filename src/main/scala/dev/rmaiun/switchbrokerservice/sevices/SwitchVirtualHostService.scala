@@ -6,30 +6,33 @@ import cats.effect.*
 import cats.effect.std.Dispatcher
 import cats.implicits.*
 import dev.profunktor.fs2rabbit.model.*
-import dev.rmaiun.switchbrokerservice.SwitchBrokerRoutes.{ SwitchBrokerResult, SwitchVirtualHostCommand }
-import dev.rmaiun.switchbrokerservice.sevices.RabbitService.{ AmqpPublisher, AmqpStructures, MonadThrowable }
-import dev.rmaiun.switchbrokerservice.sevices.{ RabbitService, SwitchVirtualHostService }
+import dev.rmaiun.switchbrokerservice.ContextualLogger
+import dev.rmaiun.switchbrokerservice.SwitchBrokerRoutes.{Contextual, RequestContext, SwitchBrokerResult, SwitchVirtualHostCommand}
+import dev.rmaiun.switchbrokerservice.sevices.RabbitService.{AmqpPublisher, AmqpStructures, MonadThrowable}
+import dev.rmaiun.switchbrokerservice.sevices.{RabbitService, SwitchVirtualHostService}
 import fs2.Stream as Fs2Stream
 import fs2.concurrent.SignallingRef
-import org.typelevel.log4cats.{ Logger, StructuredLogger }
+import org.typelevel.log4cats.slf4j.Slf4jLogger
+import org.typelevel.log4cats.{Logger, StructuredLogger}
 
 import java.time.LocalDateTime
-import scala.concurrent.duration.{ DurationInt, FiniteDuration }
+import scala.concurrent.duration.{DurationInt, FiniteDuration}
 import scala.language.postfixOps
-import scala.util.{ Random, Try }
+import scala.util.{Random, Try}
+import cats.effect.*
 
 trait SwitchVirtualHostService[F[_]]:
   def switchBroker(dto: SwitchVirtualHostCommand): F[SwitchBrokerResult]
 
 object SwitchVirtualHostService:
-  def impl[F[_]: Concurrent: Async: Logger](
+  def impl[F[_]: Concurrent: Async](
     switch: SignallingRef[F, Boolean],
     structsRef: Ref[F, AmqpStructures[F]],
     dispatcher: Dispatcher[F],
-    logger: StructuredLogger[F]
   )(using MT: MonadThrowable[F]): SwitchVirtualHostService[F] = new SwitchVirtualHostService[F]:
+    val logger: ContextualLogger[F] = ContextualLogger[F](Slf4jLogger.getLogger[F])
 
-    override def switchBroker(dto: SwitchVirtualHostCommand): F[SwitchBrokerResult] =
+    override def switchBroker(dto: SwitchVirtualHostCommand): Contextual[F[SwitchBrokerResult]] =
       val switchBrokerF = for
         structs <- structsRef.get
         _       <- RabbitService.closeConnection(structs)
@@ -44,7 +47,7 @@ object SwitchVirtualHostService:
           MT.pure(SwitchBrokerResult(LocalDateTime.now()))
       )
 
-    private def refreshSwitch(switch: SignallingRef[F, Boolean]): F[Unit] =
+    private def refreshSwitch(switch: SignallingRef[F, Boolean]): Contextual[F[Unit]] =
       switch.update(x => !x) *> switch.update(x => !x)
 
     private def processReconnectionToBroker(

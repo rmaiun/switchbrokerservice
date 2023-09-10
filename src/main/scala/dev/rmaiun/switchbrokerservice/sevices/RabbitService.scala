@@ -1,19 +1,21 @@
 package dev.rmaiun.switchbrokerservice.sevices
-
+import cats.effect.*
 import cats.Monad
 import cats.data.Kleisli
 import cats.effect.std.Dispatcher
-import cats.effect.{ Async, MonadCancel, Resource, Sync }
+import cats.effect.{Async, MonadCancel, Resource, Sync}
 import cats.implicits.*
 import dev.profunktor.fs2rabbit.config.Fs2RabbitConfig
 import dev.profunktor.fs2rabbit.config.declaration.*
-import dev.profunktor.fs2rabbit.effects.{ EnvelopeDecoder, MessageEncoder }
+import dev.profunktor.fs2rabbit.effects.{EnvelopeDecoder, MessageEncoder}
 import dev.profunktor.fs2rabbit.interpreter.RabbitClient
 import dev.profunktor.fs2rabbit.model.*
 import dev.profunktor.fs2rabbit.model.ExchangeType.Direct
-import dev.rmaiun.switchbrokerservice.SwitchBrokerRoutes.SwitchVirtualHostCommand
+import dev.rmaiun.switchbrokerservice.ContextualLogger
+import dev.rmaiun.switchbrokerservice.SwitchBrokerRoutes.{Contextual, RequestContext, SwitchVirtualHostCommand}
 import fs2.Stream as Fs2Stream
 import org.typelevel.log4cats.Logger
+import org.typelevel.log4cats.slf4j.Slf4jLogger
 
 import java.nio.charset.Charset
 import java.util.UUID
@@ -48,7 +50,8 @@ object RabbitService:
   given stringMessageCodec[F[_]: Monad]: Kleisli[F, AmqpMessage[String], AmqpMessage[Array[Byte]]] =
     Kleisli[F, AmqpMessage[String], AmqpMessage[Array[Byte]]](s => Monad[F].pure(s.copy(payload = s.payload.getBytes(Charset.defaultCharset()))))
 
-  def initRabbitStructs[F[_]: Async: Logger](cfg: Fs2RabbitConfig)(dispatcher: Dispatcher[F]): Fs2Stream[F, AmqpStructures[F]] =
+  def initRabbitStructs[F[_]: Async](cfg: Fs2RabbitConfig)(dispatcher: Dispatcher[F], rk:RequestContext): Fs2Stream[F, AmqpStructures[F]] =
+    val logger: ContextualLogger[F] = ContextualLogger[F](Slf4jLogger.getLogger[F])
     val structs = for
       rc               <- Resource.eval(RabbitClient[F](cfg, dispatcher))
       conn1            <- rc.createConnection
@@ -57,8 +60,8 @@ object RabbitService:
       con2Id            = UUID.randomUUID().toString
       publisherChannel <- rc.createChannel(conn1)
       consumerChannel  <- rc.createChannel(conn2)
-      _                <- Resource.eval(Logger[F].info(s"publisherChannel isOpen ${publisherChannel.value.isOpen} for connection $conn1"))
-      _                <- Resource.eval(Logger[F].info(s"consumerChannel isOpen ${consumerChannel.value.isOpen} for connection $conn2"))
+      _                <- Resource.eval(logger.info(s"publisherChannel isOpen ${publisherChannel.value.isOpen} for connection $conn1"))
+      _                <- Resource.eval(logger.info(s"consumerChannel isOpen ${consumerChannel.value.isOpen} for connection $conn2"))
       publisher        <- Resource.eval(rc.createPublisher[AmqpMessage[String]](instructionEx, instructionRK)(publisherChannel, summon))
       consumer         <- Resource.eval(rc.createAutoAckConsumer(instructionQ)(consumerChannel, summon))
     yield
@@ -73,6 +76,8 @@ object RabbitService:
 
   def initRabbitRoutes[F[_]: Async](dto: SwitchVirtualHostCommand)(dispatcher: Dispatcher[F]): Fs2Stream[F, Unit] =
     import cats.implicits.*
+    val logger: ContextualLogger[F] = ContextualLogger[F](Slf4jLogger.getLogger[F])
+
     val effect = for
       rc         <- Resource.eval(RabbitClient[F](reconfig(dto), dispatcher))
       channel    <- rc.createConnectionChannel
@@ -83,10 +88,11 @@ object RabbitService:
     yield channel
     Fs2Stream.eval(effect.use_)
 
-  def closeConnection[F[_]: Async: Logger](structs: AmqpStructures[F]): F[Unit] =
+  def closeConnection[F[_]: Async](structs: AmqpStructures[F]): Contextual[F[Unit]] =
+    val logger: ContextualLogger[F] = ContextualLogger[F](Slf4jLogger.getLogger[F])
     structs.connections
       .map(conn =>
-        Logger[F].info(s"Closing ${conn.value.getId} connection") *> Sync[F].delay {
+        logger.info(s"Closing ${conn.value.getId} connection") *> Sync[F].delay {
           Try(conn.value.close())
           ()
         }
